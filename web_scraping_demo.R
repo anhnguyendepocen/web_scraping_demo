@@ -1,6 +1,9 @@
 # Clay Ford
 # R Users Group October 2014 meetup
-# a very basic web scraping example
+# some very basic web scraping examples
+
+
+# EXAMPLE 1 ---------------------------------------------------------------
 
 # IMDB Top 250 movies
 # URL: http://www.imdb.com/chart/top?ref_=nv_ch_250_4
@@ -9,7 +12,8 @@ library(XML)
 library(stringr)
 library(dplyr)
 
-movies <- readLines("http://www.imdb.com/chart/top?ref_=nv_ch_250_4")
+# read the web page source code
+movies <- readLines("http://www.imdb.com/chart/top?ref_=nv_ch_250_4", warn=FALSE)
 
 # web scraping complete!
 # let the clean up begin...
@@ -23,7 +27,7 @@ movies250 <- movies[start:(end-3)]
 movies250[1]
 movies250[length(movies250)]
 
-# use readHTMLTable() to convert HTML table to data frame
+# use readHTMLTable() from XML package to convert HTML table to data frame
 imdb250 <- readHTMLTable(movies250)
 
 # extract the data frame from the first list element
@@ -44,39 +48,17 @@ imdb250$Rank <- as.numeric(row.names(imdb250))
 # Title column needs work
 imdb250$Title
 
-# split the Title string at "\n" (creates list)
-tmp <- strsplit(as.character(imdb250$Title), split = "\n")
-tmp[[1]]
-tmp[[1]][2] # title
-tmp[[1]][3] # year
+# extract title 
+title <- str_extract(string = imdb250$Title, pattern = "\n.*\n")
+title <- gsub("\n","",title)
+title <- str_trim(title)
 
+# extract year
+year <- str_extract(string = imdb250$Title, pattern = "\\([0-9]{4}\\)")
+year <- gsub("\\(|\\)","",year)
+imdb250$Year <- as.numeric(year)
 
-# extract title and year from tmp list
-
-# get title
-lapply(tmp, function(x)x[2])
-# turn into a vector
-unlist(lapply(tmp, function(x)x[2]))
-# trim leading spaces
-str_trim(unlist(lapply(tmp, function(x)x[2])))
-
-# combine the above into one line to get Titles
-imdb250$Title <- str_trim(unlist(lapply(tmp, function(x)x[2])))
-
-
-# get year
-lapply(tmp, function(x)x[3])
-# turn into vector
-unlist(lapply(tmp, function(x)x[3]))
-# extract the year; [0-9]{4} = regular expression to match 4-digit numbers
-str_extract(unlist(lapply(tmp, function(x)x[3])), "[0-9]{4}")
-
-# combine the above into one line to get Year
-imdb250$Year <- str_extract(unlist(lapply(tmp, function(x)x[3])), "[0-9]{4}")
-imdb250$Year <- as.numeric(imdb250$Year)
-
-# tidy up
-rm(movies, movies250, tmp, start, end)
+imdb250$Title <- title
 
 # see which years have the most movies on the list
 imdb250 %>% 
@@ -89,3 +71,74 @@ imdb250 %>%
 imdb250 %>% 
   filter(Year==1995)
   
+rm(movies, movies250, end, start, title, year)
+
+# EXAMPLE 2 ---------------------------------------------------------------
+
+# multiple pages
+# Craigslist listings
+# https://charlottesville.craigslist.org/search/cba
+
+dat <- readLines("https://charlottesville.craigslist.org/search/cba?s=0&", warn=FALSE)
+
+# function to prep craigslist data
+# dat is data vector obtained from readLines()
+CLPrep <- function(dat){
+  # generate an R structure representing the HTML structure
+  raw2 <- htmlTreeParse(dat, useInternalNodes = TRUE)
+  
+  # the items are in nodes called "a" with a class attribute equal to "hdrlnk"
+  item <- xpathApply(raw2,"//a[@class='hdrlnk']", xmlValue)
+  item <- unlist(item)
+  
+  # date listed in nodes called "span" with a class attribute equal to "date"
+  date <- xpathApply(raw2,"//span[@class='date']", xmlValue)
+  date <- unlist(date)
+  date <- as.Date(date,format="%b %d") # convert Oct 2 to 2014-10-02
+  
+  # item has the price listed twice or not all
+  # need to get row number of which items have prices
+  i <- which(grepl(pattern = "class=\"price\"", x = dat))
+  tmp <- dat[i]
+  # Split text at "</p>" since every item ends with that tag
+  items <- strsplit(x = tmp, split = "</p>")
+  items <- unlist(items)
+  
+  # which items have prices?
+  ind <- grep(pattern = "class=\"price\"", x=items)
+  
+  # price listed in nodes called "span" with a class attribute equal to "price"
+  prices <- xpathApply(raw2,"//span[@class='price']", xmlValue)
+  prices <- unlist(prices)
+  
+  # keep every other price (remove dupes)
+  prices <- prices[seq_along(prices) %% 2 == 0] 
+  prices <- as.numeric(gsub("\\$","",prices))
+  
+  # fill in prices per ind (ie, row numbers which had prices)
+  price <- rep(NA,length(item))
+  price[ind] <- prices
+  
+  # create data frame
+  data.frame(item, date, price, stringsAsFactors = F)
+
+}
+
+# Note URL increments by 100:
+# https://charlottesville.craigslist.org/search/cba?s=0&
+# https://charlottesville.craigslist.org/search/cba?s=100&
+# https://charlottesville.craigslist.org/search/cba?s=200&
+# increment URLs by 100; stop if code contains "no results"
+
+cl.out <- c() # create an empty object to store results
+j <- 0 # for URL
+repeat{
+  raw <- readLines(paste0("https://charlottesville.craigslist.org/search/cba?s=",j,"&"), warn=F)
+  if (any(grepl(pattern = "no results", x = raw))) break else {
+    cl.out <- rbind(cl.out,CLPrep(raw))
+    j <- j + 100
+  }
+}
+
+summary(cl.out$price)
+
