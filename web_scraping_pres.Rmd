@@ -1,0 +1,45 @@
+---
+title: "Web Scraping in R (if you have to)"
+author: "Clay Ford"
+date: "Wednesday, October 07, 2014"
+output: beamer_presentation
+---
+
+## Web Scraping
+
+Grabbing data off web pages and making it suitable for analysis. 
+
+It's almost as bad as scraping paint.
+
+Before web scraping,
+
+- see if the web site has an API
+- see if someone has already written a script
+- check with a data librarian
+- Google "web scraping tools"
+
+
+## Strategy
+
+There is no one strategy. Every web page is different.
+
+But the basic steps are as follows:
+
+1. view the source code; see if there is something consistent about the tags surrounding the data you want
+2. Read web page source code into R using `readLines` or functions from the `XML` package (or something else?)
+3. clean the data in R 
+
+Steps 1 and 2 are usually easy. Step 3 takes time.
+
+## Example
+
+```{r}
+summary(cars)
+```
+
+## Slide with Plot
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
