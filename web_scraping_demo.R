@@ -10,6 +10,7 @@
 
 library(XML)
 library(stringr)
+library(lubridate)
 library(dplyr)
 
 # read the web page source code
@@ -19,13 +20,13 @@ movies <- readLines("http://www.imdb.com/chart/top?ref_=nv_ch_250_4", warn=FALSE
 # let the clean up begin...
 
 # find the index numbers that mark the begin and end of table
-start <- which(grepl("table class=\"chart\"", movies))
-end <- which(grepl("The formula for calculating the", movies))
+start <- grep("table class=\"chart\"", movies)
+end <- grep("The formula for calculating the", movies)
 movies250 <- movies[start:(end-3)]
 
-# start and end with table tags
-movies250[1]
-movies250[length(movies250)]
+# starts and ends with table tags
+head(movies250, n=1)
+tail(movies250, n=1)
 
 # use readHTMLTable() from XML package to convert HTML table to data frame
 imdb250 <- readHTMLTable(movies250)
@@ -33,10 +34,10 @@ imdb250 <- readHTMLTable(movies250)
 # extract the data frame from the first list element
 imdb250 <- imdb250[[1]]
 
-# drop the garbage rows
+# keep columns 2 and 3
 imdb250 <- imdb250[,c(2,3)]
 
-# fix the names so they don't have spaces
+# fix the column names so they don't have spaces
 names(imdb250) <- c("Title", "Rating")
 
 # make rating numeric
@@ -48,17 +49,18 @@ imdb250$Rank <- as.numeric(row.names(imdb250))
 # Title column needs work
 imdb250$Title
 
-# extract title 
-title <- str_extract(string = imdb250$Title, pattern = "\n.*\n")
-title <- gsub("\n","",title)
-title <- str_trim(title)
+# extract title using str_extract() from stringr
+title <- str_extract(imdb250$Title, pattern = "\n.*\n")
+title <- gsub("\n","",title) # find and replace
+title <- str_trim(title) # remove leading and trailing spaces
 
 # extract year
-year <- str_extract(string = imdb250$Title, pattern = "\\([0-9]{4}\\)")
+year <- str_extract(imdb250$Title, pattern = "\\([0-9]{4}\\)")
 year <- gsub("\\(|\\)","",year)
 imdb250$Year <- as.numeric(year)
 
 imdb250$Title <- title
+# Done!
 
 # see which years have the most movies on the list
 imdb250 %>% 
@@ -85,34 +87,43 @@ dat <- readLines("https://charlottesville.craigslist.org/search/cba?s=0&", warn=
 # dat is data vector obtained from readLines()
 CLPrep <- function(dat){
   # generate an R structure representing the HTML structure
+  # htmlTreeParse() is in XML package;
+  # useInternalNodes = TRUE so I can use XPath expressions
   raw2 <- htmlTreeParse(dat, useInternalNodes = TRUE)
+  
+  # raw2 is an XML-like structure with nodes
+  # to see all the nodes: unlist(xpathApply(raw2, "//*", xmlName))
+  
+  # XPath uses path expressions to select nodes or node-sets in an XML document
   
   # the items are in nodes called "a" with a class attribute equal to "hdrlnk"
   item <- xpathApply(raw2,"//a[@class='hdrlnk']", xmlValue)
   item <- unlist(item)
   
-  # date listed in nodes called "span" with a class attribute equal to "date"
-  date <- xpathApply(raw2,"//span[@class='date']", xmlValue)
-  date <- unlist(date)
-  date <- as.Date(date,format="%b %d") # convert Oct 2 to 2014-10-02
+  # date listed in nodes called "time" with a class attribute equal to "date"
+  date.posted <- xpathApply(raw2,"//time", xmlGetAttr, "datetime")
+  date.posted <- unlist(date.posted)
+  # ymd_hm() is from the lubridate package
+  # use Sys.timezone() to get time zone
+  date.posted <- ymd_hm(date.posted, tz="America/New_York") 
   
   # item has the price listed twice or not all
-  # need to get row number of which items have prices
-  i <- which(grepl(pattern = "class=\"price\"", x = dat))
+  # first need to get element from dat that contains prices
+  i <- grep("class=\"price\"", dat)
   tmp <- dat[i]
   # Split text at "</p>" since every item ends with that tag
-  items <- strsplit(x = tmp, split = "</p>")
+  items <- strsplit(tmp, split = "</p>")
   items <- unlist(items)
   
-  # which items have prices?
-  ind <- grep(pattern = "class=\"price\"", x=items)
+  # get index number of items that have prices
+  ind <- grep("class=\"price\"", items)
   
   # price listed in nodes called "span" with a class attribute equal to "price"
   prices <- xpathApply(raw2,"//span[@class='price']", xmlValue)
   prices <- unlist(prices)
   
   # keep every other price (remove dupes)
-  prices <- prices[seq_along(prices) %% 2 == 0] 
+  prices <- prices[seq_along(prices) %% 2 == 1] 
   prices <- as.numeric(gsub("\\$","",prices))
   
   # fill in prices per ind (ie, row numbers which had prices)
@@ -120,7 +131,7 @@ CLPrep <- function(dat){
   price[ind] <- prices
   
   # create data frame
-  data.frame(item, date, price, stringsAsFactors = F)
+  data.frame(item, date.posted, price, stringsAsFactors = F)
 
 }
 
@@ -135,10 +146,11 @@ j <- 0 # for URL
 repeat{
   raw <- readLines(paste0("https://charlottesville.craigslist.org/search/cba?s=",j,"&"), warn=F)
   if (any(grepl(pattern = "no results", x = raw))) break else {
-    cl.out <- rbind(cl.out,CLPrep(raw))
+    cl.out <- rbind(cl.out,CLPrep(dat=raw))
     j <- j + 100
   }
 }
 
 summary(cl.out$price)
+
 
